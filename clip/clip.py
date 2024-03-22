@@ -39,11 +39,14 @@ _MODELS = {
     "ViT-L/14@336px": "https://openaipublic.azureedge.net/clip/models/3035c92b350959924f9f00213499208652fc7ea050643e8b385c2dac08641f02/ViT-L-14-336px.pt",
 }
 
-
+# 从本地的URL下载
 def _download(url: str, root: str):
+    # 如果目录已经存在，则不会抛出FileExistsError异常
     os.makedirs(root, exist_ok=True)
+    # 从url中提取文件名
     filename = os.path.basename(url)
 
+    # 
     expected_sha256 = url.split("/")[-2]
     download_target = os.path.join(root, filename)
 
@@ -56,8 +59,11 @@ def _download(url: str, root: str):
         else:
             warnings.warn(f"{download_target} exists, but the SHA256 checksum does not match; re-downloading the file")
 
+    # 打开url下载数据，并且以二进制写模式打开本地文件
     with urllib.request.urlopen(url) as source, open(download_target, "wb") as output:
         with tqdm(total=int(source.info().get("Content-Length")), ncols=80, unit='iB', unit_scale=True, unit_divisor=1024) as loop:
+
+            # 循环读取数据直到完成，‘8192’作为缓冲区大小
             while True:
                 buffer = source.read(8192)
                 if not buffer:
@@ -66,16 +72,17 @@ def _download(url: str, root: str):
                 output.write(buffer)
                 loop.update(len(buffer))
 
+    # 再次检验SHA256校验和，并且更新进度条
     if hashlib.sha256(open(download_target, "rb").read()).hexdigest() != expected_sha256:
         raise RuntimeError("Model has been downloaded but the SHA256 checksum does not not match")
 
     return download_target
 
-
+# 把图像转换为RGB格式
 def _convert_image_to_rgb(image):
     return image.convert("RGB")
 
-
+# 返回一个transforms.Compose对象
 def _transform(n_px):
     return Compose([
         Resize(n_px, interpolation=BICUBIC),
@@ -116,6 +123,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     preprocess : Callable[[PIL.Image], torch.Tensor]
         A torchvision transform that converts a PIL image into a tensor that the returned model can take as its input
     """
+    # ~/.cache/clip是默认的下载路径
     if name in _MODELS:
         model_path = _download(_MODELS[name], download_root or os.path.expanduser("~/.cache/clip"))
     elif os.path.isfile(name):
