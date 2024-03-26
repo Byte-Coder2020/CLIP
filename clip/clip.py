@@ -40,6 +40,7 @@ _MODELS = {
 }
 
 # 从本地的URL下载
+
 def _download(url: str, root: str):
     # 如果目录已经存在，则不会抛出FileExistsError异常
     os.makedirs(root, exist_ok=True)
@@ -77,6 +78,7 @@ def _download(url: str, root: str):
         raise RuntimeError("Model has been downloaded but the SHA256 checksum does not not match")
 
     return download_target
+
 
 # 把图像转换为RGB格式
 def _convert_image_to_rgb(image):
@@ -130,7 +132,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
         model_path = name
     else:
         raise RuntimeError(f"Model {name} not found; available models = {available_models()}")
-
+# 这里是Python的上下文管理器with，确保代码块在执行完毕后文件被正确关闭
     with open(model_path, 'rb') as opened_file:
         try:
             # loading JIT archive
@@ -143,9 +145,11 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
                 jit = False
             state_dict = torch.load(opened_file, map_location="cpu")
 
+# 假如加载JIT模型失败
     if not jit:
         model = build_model(state_dict or model.state_dict()).to(device)
         if str(device) == "cpu":
+            # 将模型参数类型转化为浮点型
             model.float()
         return model, _transform(model.visual.input_resolution)
 
@@ -154,6 +158,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     device_node = [n for n in device_holder.graph.findAllNodes("prim::Constant") if "Device" in repr(n)][-1]
 
     def _node_get(node: torch._C.Node, key: str):
+        # 获取节点的属性，在TorchScript中节点属性的类型可能是多态的
         """Gets attributes of a node which is polymorphic over return type.
         
         From https://github.com/pytorch/pytorch/pull/82628
@@ -161,18 +166,23 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
         sel = node.kindOf(key)
         return getattr(node, sel)(key)
 
+
+# 修补模型中与设备相关的节点属性
     def patch_device(module):
+        # 首先检查模块对象是否具有名为“graph”的属性，有些模块具有计算图，有些没有
         try:
             graphs = [module.graph] if hasattr(module, "graph") else []
         except RuntimeError:
             graphs = []
 
+        # 处理具有forward1的模块 
         if hasattr(module, "forward1"):
             graphs.append(module.forward1.graph)
 
         for graph in graphs:
             for node in graph.findAllNodes("prim::Constant"):
                 if "value" in node.attributeNames() and str(_node_get(node, "value")).startswith("cuda"):
+                    # 将设备节点 device_node 的属性复制到当前节点，以修补与设备相关的节点属性
                     node.copyAttributes(device_node)
 
     model.apply(patch_device)
@@ -220,9 +230,11 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, truncate: b
         An input string or a list of input strings to tokenize
 
     context_length : int
+        上下文长度,默认为77,所有的CLIP模型使用的上下文长度
         The context length to use; all CLIP models use 77 as the context length
 
     truncate: bool
+    截断
         Whether to truncate the text in case its encoding is longer than the context length
 
     Returns
@@ -233,9 +245,11 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, truncate: b
     if isinstance(texts, str):
         texts = [texts]
 
+    # 获取起始和结束的特殊Token
     sot_token = _tokenizer.encoder["<|startoftext|>"]
     eot_token = _tokenizer.encoder["<|endoftext|>"]
     all_tokens = [[sot_token] + _tokenizer.encode(text) + [eot_token] for text in texts]
+    # 创建一个全零张量，用于存储Token结果
     if packaging.version.parse(torch.__version__) < packaging.version.parse("1.8.0"):
         result = torch.zeros(len(all_tokens), context_length, dtype=torch.long)
     else:
@@ -248,6 +262,7 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, truncate: b
                 tokens[-1] = eot_token
             else:
                 raise RuntimeError(f"Input {texts[i]} is too long for context length {context_length}")
+        # 将Tokenizer结果存储在结果张量中
         result[i, :len(tokens)] = torch.tensor(tokens)
 
     return result
